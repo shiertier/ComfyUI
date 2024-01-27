@@ -1,52 +1,69 @@
 import comfy.options
 comfy.options.enable_args_parsing()
 
-import os
+iimport os
 import importlib.util
 import folder_paths
 import time
 
 def execute_prestartup_script():
-    def execute_script(script_path):
-        module_name = os.path.splitext(script_path)[0]
+    # 定义一个执行脚本的方法
+    def execute_module_script(script_path):
+        # 从脚本路径中提取模块名称
+        module_name = os.path.splitext(os.path.basename(script_path))[0]
         try:
+            # 使用importlib.util创建一个模块规范
             spec = importlib.util.spec_from_file_location(module_name, script_path)
             module = importlib.util.module_from_spec(spec)
+            # 执行模块
             spec.loader.exec_module(module)
             return True
         except Exception as e:
-            print(f"Failed to execute startup-script: {script_path} / {e}")
+            # 如果执行过程中发生异常，打印错误信息
+            print(f"执行预启动脚本失败: {script_path} / {e}")
         return False
 
-    node_paths = folder_paths.get_folder_paths("custom_nodes")
-    for custom_node_path in node_paths:
-        possible_modules = os.listdir(custom_node_path)
-        node_prestartup_times = []
+    # 获取自定义节点文件夹路径
+    node_dirs = folder_paths.get_folder_paths("custom_nodes")
+    # 用于存储节点预启动时间的列表
+    prestartup_times = []
 
-        for possible_module in possible_modules:
-            module_path = os.path.join(custom_node_path, possible_module)
-            if os.path.isfile(module_path) or module_path.endswith(".disabled") or module_path == "__pycache__":
+    # 遍历所有自定义节点路径
+    for node_dir in node_dirs:
+        # 获取可能的模块列表
+        items = os.listdir(node_dir)
+
+        # 遍历可能的模块
+        for item in items:
+            module_path = os.path.join(node_dir, item)
+            # 如果是文件、隐藏目录，已禁用或为__pycache__，则跳过
+            if os.path.isfile(module_path) or item.endswith(".disabled") or item == "__pycache__" or item.startswith('.'):
                 continue
 
+            # 拼接预启动脚本路径
             script_path = os.path.join(module_path, "prestartup_script.py")
+            # 如果预启动脚本存在，则执行
             if os.path.exists(script_path):
-                time_before = time.perf_counter()
-                success = execute_script(script_path)
-                node_prestartup_times.append((time.perf_counter() - time_before, module_path, success))
-    if len(node_prestartup_times) > 0:
-        print("\nPrestartup times for custom nodes:")
-        for n in sorted(node_prestartup_times):
-            if n[2]:
-                import_message = ""
-            else:
-                import_message = " (PRESTARTUP FAILED)"
-            print("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
+                # 记录执行前的时间
+                start_time = time.perf_counter()
+                # 执行脚本并记录成功与否
+                success = execute_module_script(script_path)
+                # 记录执行时间和模块路径
+                prestartup_times.append((time.perf_counter() - start_time, module_path, success))
+
+    # 如果有预启动时间记录，则打印出来
+    if prestartup_times:
+        print("\n自定义节点预启动时间:")
+        for exec_time, path, success in sorted(prestartup_times):
+            status_message = " (预启动失败)" if not success else ""
+            print(f"{exec_time:6.1f} 秒{status_message}: {path}")
         print()
 
+# 执行预启动脚本
 execute_prestartup_script()
 
 
-# Main code
+# 主要代码
 import asyncio
 import itertools
 import shutil
@@ -56,19 +73,25 @@ import gc
 from comfy.cli_args import args
 
 if os.name == "nt":
+    # 如果操作系统为 Windows（'nt'），则导入 logging 模块并过滤特定信息
     import logging
     logging.getLogger("xformers").addFilter(lambda record: 'A matching Triton is not available' not in record.getMessage())
 
 if __name__ == "__main__":
+    # 如果指定了 cuda_device 参数，则设置 CUDA_VISIBLE_DEVICES 环境变量来控制使用的 GPU 设备
     if args.cuda_device is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
         print("Set cuda device to:", args.cuda_device)
 
+    # 如果 deterministic 参数为 True，则设置 CUBLAS_WORKSPACE_CONFIG 环境变量
+    # 以确保在每次运行时都使用相同的算法和参数，获得确定性的结果
     if args.deterministic:
         if 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
             os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":4096:8"
 
+    # 导入一个名为 cuda_malloc 的模块（可能是自定义模块或外部依赖项）
     import cuda_malloc
+
 
 import comfy.utils
 import yaml
