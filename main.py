@@ -103,17 +103,48 @@ from nodes import init_custom_nodes
 import comfy.model_management
 
 def cuda_malloc_warning():
+    """
+    检查当前Torch设备是否支持CUDA内存预分配功能，如果不支持则打印警告信息。
+
+    如果您遇到“CUDA错误”问题，请使用 --disable-cuda-malloc 参数禁用CUDA预分配内存。
+
+    """
+    # 获取当前的Torch设备
     device = comfy.model_management.get_torch_device()
+    # 获取Torch设备的名称
     device_name = comfy.model_management.get_torch_device_name(device)
+    # 默认情况下，没有CUDA内存分配警告
     cuda_malloc_warning = False
+
+    # 判断设备名称中是否包含"cudaMallocAsync"
     if "cudaMallocAsync" in device_name:
+        # 遍历黑名单列表，检查设备名称是否在黑名单中
         for b in cuda_malloc.blacklist:
             if b in device_name:
+                # 如果设备名称在黑名单中，则触发CUDA内存分配警告
                 cuda_malloc_warning = True
+        
+        # 如果触发了CUDA内存分配警告
         if cuda_malloc_warning:
-            print("\nWARNING: this card most likely does not support cuda-malloc, if you get \"CUDA error\" please run ComfyUI with: --disable-cuda-malloc\n")
+            # 打印警告信息（中文版）
+            print("\n警告：您的显卡很可能不支持CUDA内存预分配功能，如果遇到\"CUDA错误\"问题，请使用 --disable-cuda-malloc 参数禁用CUDA预分配内存。\n")
+
+# 调用函数进行CUDA内存分配警告检查
+cuda_malloc_warning()
+
 
 def prompt_worker(q, server):
+    """
+    对给定的问题队列进行处理
+
+    Args:
+        q (Queue): 问题队列
+        server: 服务器对象
+
+    Returns:
+        None
+    """
+
     e = execution.PromptExecutor(server)
     last_gc_collect = 0
     need_gc = False
@@ -124,6 +155,7 @@ def prompt_worker(q, server):
         if need_gc:
             timeout = max(gc_collect_interval - (current_time - last_gc_collect), 0.0)
 
+        # 获取队列中的问题
         queue_item = q.get(timeout=timeout)
         if queue_item is not None:
             item, item_id = queue_item
@@ -131,12 +163,13 @@ def prompt_worker(q, server):
             prompt_id = item[1]
             server.last_prompt_id = prompt_id
 
+            # 执行问题
             e.execute(item[2], prompt_id, item[3], item[4])
             need_gc = True
             q.task_done(item_id,
                         e.outputs_ui,
                         status=execution.PromptQueue.ExecutionStatus(
-                            status_str='success' if e.success else 'error',
+                            status_str='成功' if e.success else '失败',
                             completed=e.success,
                             messages=e.status_messages))
             if server.client_id is not None:
@@ -144,12 +177,13 @@ def prompt_worker(q, server):
 
             current_time = time.perf_counter()
             execution_time = current_time - execution_start_time
-            print("Prompt executed in {:.2f} seconds".format(execution_time))
+            print("问题执行时间为{:.2f}秒".format(execution_time))
 
         flags = q.get_flags()
         free_memory = flags.get("free_memory", False)
 
         if flags.get("unload_models", free_memory):
+            # 卸载所有模型
             comfy.model_management.unload_all_models()
             need_gc = True
             last_gc_collect = 0
@@ -162,6 +196,7 @@ def prompt_worker(q, server):
         if need_gc:
             current_time = time.perf_counter()
             if (current_time - last_gc_collect) > gc_collect_interval:
+                # 执行垃圾回收和缓存清理
                 gc.collect()
                 comfy.model_management.soft_empty_cache()
                 last_gc_collect = current_time
